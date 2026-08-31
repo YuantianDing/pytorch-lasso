@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pytorch-lasso"
+version = "0.2.0"
+description = "L1-regularized least squares (lasso) and LAD-lasso solvers for PyTorch"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=1.13",
+    "numpy",
+    "scipy",
+    "tqdm",
+]
+
+[project.urls]
+Repository = "https://github.com/YuantianDing/pytorch-lasso"
+
+[tool.hatch.build.targets.wheel]
+packages = ["lasso"]

@@ -114,3 +114,37 @@ Pytorch-lasso offers two variants of the dictionary learning problem: 1) the "co
 [8] "The split Bregman method for L1-regularized problems". Goldstein & Osher, 2008.
 
 [9] "Scalable training of L1-regularized log-linear models". Andrew & Gao, 2007.
+## 5. LAD-Lasso (robust dictionary learning)
+
+The `lasso.lad` module adds dictionary learning with a *robust* l1 fit term
+(least absolute deviations),
+
+<p align="center"><i>min<sub>D,S</sub> ||A − DS||<sub>1</sub> + λ||S||<sub>1</sub>&nbsp;&nbsp;s.t.&nbsp;&nbsp;||d<sub>j</sub>||<sub>2</sub> ≤ 1,</i></p>
+
+solved by ADMM with the splitting `E = A − DS` (soft-threshold updates for
+E and S, least-squares dictionary updates, scaled dual). Note the
+transposed convention relative to `lasso.linear`: columns of `A` are data
+points (`X = A.T`, `W = D`, `Z = S.T`).
+
+```python
+import torch
+from lasso.lad import admm_solve, ista_solve
+
+A = torch.randn(64, 2000)                       # columns are data points
+
+# LAD-lasso dictionary learning via ADMM
+D, S = admm_solve(A, k=128, lam=0.2)
+
+# init="topk" warm-starts at the k-largest-columns truncation solution;
+# compiled=True runs each iteration through torch.compile (~2.7x on CPU)
+D, S = admm_solve(A, k=128, lam=0.5, max_iter=50, init="topk", compiled=True)
+
+# the traditional-lasso counterpart, same conventions
+D, S = ista_solve(A, k=128, lam=0.05)
+```
+
+`admm_solve` normalizes its step sizes by power-iteration spectral-norm
+estimates, so the default `alpha`/`beta` of 1.0 are stable at any scale,
+and `rho=None` auto-scales the ADMM penalty to the data
+(`10 / mean|A|`). A smoothed (Huber) proximal-gradient LAD variant is
+available as `lasso.lad.lad_lasso.ista_solve` for reference.
