@@ -1,0 +1,133 @@
+from tqdm import tqdm
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from ..linear.sparse_encode import sparse_encode
+from ..linear.dict_learning import update_dict, update_dict_ridge
+
+
+def _soft(x, t):
+    """Elementwise soft-thresholding: sign(x) * max(|x| - t, 0)."""
+    return x.sign() * (x.abs() - t).clamp(min=0)
+
+
+def lad_lasso_loss(X, Z, weight, alpha=1.0):
+    X_hat = torch.matmul(Z, weight.T)
+    loss = (X - X_hat).abs().sum() + alpha * Z.abs().sum()
+    return loss / X.size(0)
+
+
+def dict_evaluate(X, weight, alpha, **kwargs):
+    X = X.to(weight.device)
+    Z = sparse_encode(X, weight, alpha, **kwargs)
+    loss = lad_lasso_loss(X, Z, weight, alpha)
+    return loss
+
+
+def admm_dict_learning(X, n_components, alpha=1.0, rho=None, constrained=True,
+                       persist=False, lambd=1e-2, steps=60, device='cpu',
+                       progbar=True, init='orthogonal', **solver_kwargs):
+    r"""LAD-lasso dictionary learning via ADMM.
+
+    Solves the robust (least-absolute-deviations) counterpart of
+    :func:`lasso.linear.dict_learning`,
+
+    .. math::
+        \min_{W, Z} \|X - Z W^T\|_1 + \alpha \|Z\|_1
+        \quad s.t. \quad \|w_j\|_2 \le 1,
+
+    by splitting the fit term as ``E = X - Z W^T`` (scaled dual ``U``) and
+    iterating, in the concise single-state form (``B = X - E + U``):
+
+    .. code-block:: text
+
+        Z = argmin_Z  (alpha/rho) ||Z||_1 + 1/2 ||Z W^T - B||_F^2
+        W = argmin_{W in C}  ||Z W^T - B||_F^2
+        X_hat = Z W^T
+        A_U = X + B - X_hat
+        B = A_U - soft(A_U - X_hat, 1/rho)
+
+    The ``Z`` subproblem is a standard lasso solved by
+    :func:`lasso.linear.sparse_encode` — pass ``algorithm=`` (and other
+    solver kwargs) to choose among its methods ('ista', 'cd', 'gpsr',
+    'interior-point', ...).  The ``W`` update is exactly
+    :func:`lasso.linear.update_dict` (constrained) or
+    :func:`lasso.linear.update_dict_ridge`.
+
+    Parameters mirror :func:`lasso.linear.dict_learning`, plus:
+
+    rho : float, optional
+        ADMM penalty; the entrywise threshold absorbing residuals into
+        ``E`` is ``1/rho``, which must sit well below the typical entry
+        magnitude of X.  None (default) uses ``10 / mean(|X|)``.
+    init : 'orthogonal' | 'topk'
+        'orthogonal' matches :func:`lasso.linear.dict_learning`.  'topk'
+        seeds the dictionary with the ``n_components`` largest samples by
+        l1 norm and warm-starts the codes with the matching diagonal, so
+        iteration 0 reproduces those samples exactly (the truncation
+        solution); it implies ``persist`` semantics for the first step.
+    """
+    n_samples, n_features = X.shape
+    X = X.to(device)
+    if rho is None:
+        rho = 10.0 / float(X.abs().mean().clamp_min(1e-12))
+
+    Z0 = None
+    if init == 'topk':
+        idx = X.abs().sum(dim=1).argsort(descending=True)[:n_components]
+        weight = X[idx].T.clone()
+        norms = weight.norm(dim=0).clamp_min(1e-8)
+        Z0 = X.new_zeros(n_samples, n_components)
+        Z0[idx, torch.arange(len(idx), device=X.device)] = norms
+    else:
+        weight = torch.empty(n_features, n_components, device=device)
+        nn.init.orthogonal_(weight)
+    if constrained:
+        weight = F.normalize(weight, dim=0)
+
+    X_hat = torch.zeros_like(X) if Z0 is None else torch.matmul(Z0, weight.T)
+    B = X - _soft(X - X_hat, 1.0 / rho)
+
+    losses = torch.zeros(steps, device=device)
+    with tqdm(total=steps, disable=not progbar) as progress_bar:
+        for i in range(steps):
+            # lasso subproblem for the codes, against the ADMM target B
+            Z = sparse_encode(B, weight, alpha / rho, Z0, **solver_kwargs)
+            losses[i] = lad_lasso_loss(X, Z, weight, alpha)
+            if persist or init == 'topk':
+                Z0 = Z
+
+            # update dictionary (same updates as lasso.linear)
+            if constrained:
+                weight = update_dict(weight, B, Z)
+            else:
+                weight = update_dict_ridge(B, Z, lambd=lambd)
+
+            # refresh the ADMM target (E and U updates, folded)
+            X_hat = torch.matmul(Z, weight.T)
+            A_U = X + B - X_hat
+            B = A_U - _soft(A_U - X_hat, 1.0 / rho)
+
+            progress_bar.set_postfix(loss=losses[i].item())
+            progress_bar.update(1)
+
+    return weight, losses
+
+
+_learning_methods = {
+    'admm': admm_dict_learning,
+    # room for future LAD dictionary-learning methods, e.g. smoothed
+    # (Huber) proximal-gradient or IRLS variants.
+}
+
+
+def dict_learning(X, n_components, method='admm', **kwargs):
+    """Dispatch to a LAD-lasso dictionary-learning method.
+
+    Currently only 'admm' (:func:`admm_dict_learning`) is registered; the
+    registry reserves space for other methods.
+    """
+    if method not in _learning_methods:
+        raise ValueError("invalid method parameter '{}'.".format(method))
+    return _learning_methods[method](X, n_components, **kwargs)

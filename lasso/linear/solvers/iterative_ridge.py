@@ -2,7 +2,10 @@ import warnings
 from torch import Tensor
 import torch
 from scipy.optimize import minimize_scalar
-from scipy.optimize.optimize import _status_message
+try:
+    from scipy.optimize.optimize import _status_message
+except ImportError:  # scipy >= 1.8 renamed the private module
+    from scipy.optimize._optimize import _status_message
 
 from ...conjgrad import conjgrad
 from ..utils import batch_cholesky_solve

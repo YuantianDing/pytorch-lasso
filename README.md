@@ -119,32 +119,32 @@ Pytorch-lasso offers two variants of the dictionary learning problem: 1) the "co
 The `lasso.lad` module adds dictionary learning with a *robust* l1 fit term
 (least absolute deviations),
 
-<p align="center"><i>min<sub>D,S</sub> ||A − DS||<sub>1</sub> + λ||S||<sub>1</sub>&nbsp;&nbsp;s.t.&nbsp;&nbsp;||d<sub>j</sub>||<sub>2</sub> ≤ 1,</i></p>
+<p align="center"><i>min<sub>W,Z</sub> ||X − ZW<sup>T</sup>||<sub>1</sub> + α||Z||<sub>1</sub>&nbsp;&nbsp;s.t.&nbsp;&nbsp;||w<sub>j</sub>||<sub>2</sub> ≤ 1,</i></p>
 
-solved by ADMM with the splitting `E = A − DS` (soft-threshold updates for
-E and S, least-squares dictionary updates, scaled dual). Note the
-transposed convention relative to `lasso.linear`: columns of `A` are data
-points (`X = A.T`, `W = D`, `Z = S.T`).
+in the same conventions and API style as `lasso.linear`. The outer ADMM
+loop splits the fit term as `E = X − ZW^T`; each iteration solves a
+standard lasso subproblem for `Z` — with **any** `lasso.linear` solver via
+`algorithm=` — and updates the dictionary with the same
+`update_dict` / `update_dict_ridge` code as `lasso.linear.dict_learning`.
 
 ```python
 import torch
-from lasso.lad import admm_solve, ista_solve
+from lasso.lad import dict_learning, admm_dict_learning
 
-A = torch.randn(64, 2000)                       # columns are data points
+X = torch.randn(2000, 64)   # rows are samples, as in lasso.linear
 
-# LAD-lasso dictionary learning via ADMM
-D, S = admm_solve(A, k=128, lam=0.2)
+# LAD-lasso dictionary learning (ADMM outer loop, ISTA inner lasso)
+W, losses = admm_dict_learning(X, n_components=128, alpha=0.2)
 
-# init="topk" warm-starts at the k-largest-columns truncation solution;
-# compiled=True runs each iteration through torch.compile (~2.7x on CPU)
-D, S = admm_solve(A, k=128, lam=0.5, max_iter=50, init="topk", compiled=True)
+# any lasso.linear solver works for the inner subproblem
+W, losses = admm_dict_learning(X, n_components=128, alpha=0.2, algorithm='cd')
 
-# the traditional-lasso counterpart, same conventions
-D, S = ista_solve(A, k=128, lam=0.05)
+# init='topk' warm-starts at the k-largest-samples truncation solution
+W, losses = admm_dict_learning(X, n_components=128, alpha=0.5, init='topk')
+
+# dispatcher, reserving room for future LAD learning methods
+W, losses = dict_learning(X, n_components=128, method='admm', alpha=0.2)
 ```
 
-`admm_solve` normalizes its step sizes by power-iteration spectral-norm
-estimates, so the default `alpha`/`beta` of 1.0 are stable at any scale,
-and `rho=None` auto-scales the ADMM penalty to the data
-(`10 / mean|A|`). A smoothed (Huber) proximal-gradient LAD variant is
-available as `lasso.lad.lad_lasso.ista_solve` for reference.
+`rho=None` auto-scales the ADMM penalty to the data (`10 / mean|X|`); the
+entrywise threshold absorbing residuals into `E` is `1/rho`.
