@@ -133,7 +133,7 @@ def _init_dictionary(X, n_components, init, constrained):
     n_samples, n_features = X.shape
     Z0 = None
     if init == 'topk':
-        idx = X.abs().sum(dim=1).argsort(descending=True)[:n_components]
+        idx = torch.topk(X.abs().sum(dim=1), n_components).indices
         weight = X[idx].T.clone()
         norms = weight.norm(dim=0).clamp_min(1e-8)
         Z0 = X.new_zeros(n_samples, n_components)
