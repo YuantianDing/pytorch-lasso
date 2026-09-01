@@ -94,7 +94,8 @@ def admm_dict_learning(X, n_components, alpha=1.0, rho=None, constrained=True,
 
     weight, Z0 = _init_dictionary(X, n_components, init, constrained)
 
-    X_hat = torch.zeros_like(X) if Z0 is None else torch.matmul(Z0, weight.T)
+    Z = X.new_zeros(n_samples, n_components) if Z0 is None else Z0
+    X_hat = torch.matmul(Z, weight.T)
     B = X - _soft(X - X_hat, 1.0 / rho)
 
     losses = torch.zeros(steps, device=device)

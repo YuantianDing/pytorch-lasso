@@ -97,3 +97,13 @@ def test_alt_dict_learning():
     W2, _ = dict_learning(X, n_components=24, method='alt', alpha=0.1,
                           steps=2, progbar=False, maxiter=3)
     assert W2.shape == (16, 24)
+
+
+def test_zero_steps_returns_warm_start():
+    X = _outlier_problem()
+    W, Z, losses = admm_dict_learning(
+        X, n_components=24, steps=0, init='topk', progbar=False, return_codes=True,
+    )
+    idx = X.abs().sum(1).argsort(descending=True)[:24]
+    torch.testing.assert_close(Z[idx] @ W.T, X[idx], atol=1e-5, rtol=1e-4)
+    assert losses.shape == (0,)
