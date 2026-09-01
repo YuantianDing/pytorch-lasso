@@ -27,7 +27,8 @@ def dict_evaluate(X, weight, alpha, **kwargs):
 
 def admm_dict_learning(X, n_components, alpha=1.0, rho=None, constrained=True,
                        persist=False, lambd=1e-2, steps=60, device='cpu',
-                       progbar=True, init='orthogonal', **solver_kwargs):
+                       progbar=True, init='orthogonal', return_codes=False,
+                       **solver_kwargs):
     r"""LAD-lasso dictionary learning via ADMM.
 
     Solves the robust (least-absolute-deviations) counterpart of
@@ -67,6 +68,10 @@ def admm_dict_learning(X, n_components, alpha=1.0, rho=None, constrained=True,
         l1 norm and warm-starts the codes with the matching diagonal, so
         iteration 0 reproduces those samples exactly (the truncation
         solution); it implies ``persist`` semantics for the first step.
+    return_codes : bool
+        Also return the final codes ``Z``.  Unlike the l2 case they cannot
+        be recovered by re-encoding ``X`` afterwards, since the ADMM codes
+        are fitted against the target ``B``, not ``X``.
     """
     n_samples, n_features = X.shape
     X = X.to(device)
@@ -112,6 +117,8 @@ def admm_dict_learning(X, n_components, alpha=1.0, rho=None, constrained=True,
             progress_bar.set_postfix(loss=losses[i].item())
             progress_bar.update(1)
 
+    if return_codes:
+        return weight, Z, losses
     return weight, losses
 
 
