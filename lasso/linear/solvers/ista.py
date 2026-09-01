@@ -9,9 +9,14 @@ def _lipschitz_constant(W):
     #L = torch.linalg.norm(W, ord=2) ** 2
     WtW = torch.matmul(W.t(), W)
     #L = torch.linalg.eigvalsh(WtW)[-1]
-    L = eigsh(WtW.detach().cpu().numpy(), k=1, which='LM',
-              return_eigenvectors=False).item()
-    return L
+    try:
+        L = eigsh(WtW.detach().cpu().numpy(), k=1, which='LM',
+                  return_eigenvectors=False).item()
+    except Exception:
+        # ARPACK fails on degenerate (e.g. all-zero) dictionaries; fall
+        # back to a dense symmetric eigensolve.
+        L = torch.linalg.eigvalsh(WtW.detach().double())[-1].item()
+    return max(L, 1e-12)
 
 
 def backtracking(z, x, weight, alpha, lr0, eta=1.5, maxiter=1000, verbose=False):
