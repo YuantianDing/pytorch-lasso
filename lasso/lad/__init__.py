@@ -11,5 +11,7 @@ dictionary update reuses :func:`lasso.linear.update_dict` /
 :func:`update_dict_ridge`.
 """
 
+from . import solvers
 from .dict_learning import (dict_learning, dict_evaluate, admm_dict_learning,
-                            lad_lasso_loss)
+                            alt_dict_learning, lad_lasso_loss)
+from .sparse_code import sparse_code, initialize_code

@@ -55,3 +55,45 @@ def test_dispatcher():
     assert W.shape == (16, 24)
     with pytest.raises(ValueError):
         dict_learning(X, n_components=24, method='nope')
+
+
+def test_pcd_sparse_code_decreases_lad_objective():
+    from lasso.lad import sparse_code, lad_lasso_loss
+    X = _outlier_problem()
+    W = torch.randn(16, 24)
+    W = W / W.norm(dim=0, keepdim=True)
+    z0 = torch.zeros(400, 24)
+    before = lad_lasso_loss(X, z0, W, 0.1)
+    for n_update in (1, 4):
+        Z = sparse_code(X, W, 0.1, algorithm='pcd', maxiter=10, n_update=n_update)
+        assert lad_lasso_loss(X, Z, W, 0.1) < before
+
+
+def test_pcd_single_coordinate_step_is_exact():
+    # with one atom the sweep must return the exact 1-D LAD-lasso minimizer
+    from lasso.lad.solvers import parallel_coord_descent
+    torch.manual_seed(0)
+    X = torch.randn(50, 7)
+    W = torch.randn(7, 1)
+    Z = parallel_coord_descent(X, W, None, 0.3, maxiter=1)
+    ts = torch.linspace(-5, 5, 20001)
+    for n in range(5):
+        f = (X[n][None] - ts[:, None] * W.T).abs().sum(1) + 0.3 * ts.abs()
+        best = ts[f.argmin()]
+        fz = (X[n] - Z[n] * W[:, 0]).abs().sum() + 0.3 * Z[n].abs().sum()
+        assert fz <= f.min() + 1e-4, (float(Z[n]), float(best))
+
+
+def test_alt_dict_learning():
+    from lasso.lad import alt_dict_learning
+    X = _outlier_problem()
+    W, Z, losses = alt_dict_learning(
+        X, n_components=24, alpha=0.1, steps=4, progbar=False, init='topk',
+        maxiter=5, n_update=2, return_codes=True,
+    )
+    assert W.shape == (16, 24) and Z.shape == (400, 24)
+    assert torch.all(W.norm(dim=0) <= 1.0 + 1e-5)
+    assert losses[-1] <= losses[0]
+    W2, _ = dict_learning(X, n_components=24, method='alt', alpha=0.1,
+                          steps=2, progbar=False, maxiter=3)
+    assert W2.shape == (16, 24)

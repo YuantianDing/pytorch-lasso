@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from ..linear.sparse_encode import sparse_encode
 from ..linear.dict_learning import (update_dict, update_dict_lstsq,
                                     update_dict_ridge)
+from .sparse_code import sparse_code as lad_sparse_code
 
 
 def _soft(x, t):
@@ -91,18 +92,7 @@ def admm_dict_learning(X, n_components, alpha=1.0, rho=None, constrained=True,
     if rho is None:
         rho = 10.0 / float(X.abs().mean().clamp_min(1e-12))
 
-    Z0 = None
-    if init == 'topk':
-        idx = X.abs().sum(dim=1).argsort(descending=True)[:n_components]
-        weight = X[idx].T.clone()
-        norms = weight.norm(dim=0).clamp_min(1e-8)
-        Z0 = X.new_zeros(n_samples, n_components)
-        Z0[idx, torch.arange(len(idx), device=X.device)] = norms
-    else:
-        weight = torch.empty(n_features, n_components, device=device)
-        nn.init.orthogonal_(weight)
-    if constrained:
-        weight = F.normalize(weight, dim=0)
+    weight, Z0 = _init_dictionary(X, n_components, init, constrained)
 
     X_hat = torch.zeros_like(X) if Z0 is None else torch.matmul(Z0, weight.T)
     B = X - _soft(X - X_hat, 1.0 / rho)
@@ -137,8 +127,67 @@ def admm_dict_learning(X, n_components, alpha=1.0, rho=None, constrained=True,
     return weight, losses
 
 
+def _init_dictionary(X, n_components, init, constrained):
+    """Shared dictionary / code initialization ('orthogonal' or 'topk')."""
+    n_samples, n_features = X.shape
+    Z0 = None
+    if init == 'topk':
+        idx = X.abs().sum(dim=1).argsort(descending=True)[:n_components]
+        weight = X[idx].T.clone()
+        norms = weight.norm(dim=0).clamp_min(1e-8)
+        Z0 = X.new_zeros(n_samples, n_components)
+        Z0[idx, torch.arange(len(idx), device=X.device)] = norms
+    else:
+        weight = torch.empty(n_features, n_components, device=X.device)
+        nn.init.orthogonal_(weight)
+    if constrained:
+        weight = F.normalize(weight, dim=0)
+    return weight, Z0
+
+
+def alt_dict_learning(X, n_components, alpha=1.0, constrained=True, steps=60,
+                      device='cpu', progbar=True, init='orthogonal',
+                      return_codes=False, algorithm='pcd', **solver_kwargs):
+    r"""LAD-lasso dictionary learning by alternating LAD sparse coding.
+
+    Both half-steps are solved by the same :func:`lasso.lad.sparse_code`
+    method (``algorithm=``): the codes as
+
+    .. math::
+        Z = \arg\min_Z \|X - Z W^T\|_1 + \alpha \|Z\|_1 ,
+
+    and the dictionary as the *transposed* coding problem with no l1
+    penalty, :math:`W = \arg\min_W \|X^T - W Z^T\|_1` (each atom is
+    then projected onto the unit ball when ``constrained``).  No ADMM
+    splitting: the l1 fit is handled directly by the coding solver.
+    Parameters mirror :func:`admm_dict_learning`.
+    """
+    X = X.to(device)
+    weight, Z = _init_dictionary(X, n_components, init, constrained)
+    if Z is None:
+        Z = X.new_zeros(X.shape[0], n_components)
+
+    losses = torch.zeros(steps, device=device)
+    with tqdm(total=steps, disable=not progbar) as progress_bar:
+        for i in range(steps):
+            Z = lad_sparse_code(X, weight, alpha, Z, algorithm=algorithm,
+                                **solver_kwargs)
+            losses[i] = lad_lasso_loss(X, Z, weight, alpha)
+            weight = lad_sparse_code(X.T, Z, 0.0, weight, algorithm=algorithm,
+                                     **solver_kwargs)
+            if constrained:
+                weight = weight / weight.norm(dim=0, keepdim=True).clamp(min=1.0)
+            progress_bar.set_postfix(loss=losses[i].item())
+            progress_bar.update(1)
+
+    if return_codes:
+        return weight, Z, losses
+    return weight, losses
+
+
 _learning_methods = {
     'admm': admm_dict_learning,
+    'alt': alt_dict_learning,
     # room for future LAD dictionary-learning methods, e.g. smoothed
     # (Huber) proximal-gradient or IRLS variants.
 }
@@ -147,8 +196,9 @@ _learning_methods = {
 def dict_learning(X, n_components, method='admm', **kwargs):
     """Dispatch to a LAD-lasso dictionary-learning method.
 
-    Currently only 'admm' (:func:`admm_dict_learning`) is registered; the
-    registry reserves space for other methods.
+    'admm' (:func:`admm_dict_learning`) and 'alt'
+    (:func:`alt_dict_learning`) are registered; the registry reserves
+    space for other methods.
     """
     if method not in _learning_methods:
         raise ValueError("invalid method parameter '{}'.".format(method))

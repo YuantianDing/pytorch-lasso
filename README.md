@@ -154,3 +154,24 @@ W, losses = dict_learning(X, n_components=128, method='admm', alpha=0.2)
 
 `rho=None` auto-scales the ADMM penalty to the data (`10 / mean|X|`); the
 entrywise threshold absorbing residuals into `E` is `1/rho`.
+
+__LAD sparse coding and alternating learning.__ `lasso.lad.sparse_code`
+solves the coding problem with a fixed dictionary but an l1 *fit*,
+`min_z ||x − zW^T||_1 + α||z||_1`, mirroring `lasso.linear.sparse_encode`.
+Its first solver, `'pcd'` (parallel coordinate descent), computes every
+coordinate's exact 1-D minimizer — a weighted median — and applies the
+`n_update` coordinates with the largest improvement per sample (falling
+back to the single best coordinate whenever the joint update would not
+beat it, so sweeps stay monotone). `alt_dict_learning` learns a
+dictionary by alternating that same solver on the codes and on the
+transposed problem `min_W ||X^T − WZ^T||_1` for the atoms, with no ADMM
+splitting:
+
+```python
+from lasso.lad import sparse_code, alt_dict_learning
+
+Z = sparse_code(X, W, alpha=0.2, algorithm='pcd', maxiter=20, n_update=4)
+W, Z, losses = alt_dict_learning(X, n_components=128, alpha=0.2, steps=10,
+                                 init='topk', maxiter=5, n_update=4,
+                                 return_codes=True)
+```
