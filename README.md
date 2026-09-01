@@ -139,8 +139,14 @@ W, losses = admm_dict_learning(X, n_components=128, alpha=0.2)
 # any lasso.linear solver works for the inner subproblem
 W, losses = admm_dict_learning(X, n_components=128, alpha=0.2, algorithm='cd')
 
-# init='topk' warm-starts at the k-largest-samples truncation solution
-W, losses = admm_dict_learning(X, n_components=128, alpha=0.5, init='topk')
+# dictionary updates are lasso.linear's: 'bcd' (per-atom update_dict),
+# 'lstsq' (vectorized least squares + projection, fastest for many atoms)
+# or 'ridge' (unconstrained); init='topk' warm-starts at the
+# k-largest-samples truncation solution and also returns the final codes
+W, Z, losses = admm_dict_learning(X, n_components=128, alpha=0.5, steps=20,
+                                  init='topk', dict_update='lstsq',
+                                  algorithm='ista', maxiter=10,
+                                  return_codes=True)
 
 # dispatcher, reserving room for future LAD learning methods
 W, losses = dict_learning(X, n_components=128, method='admm', alpha=0.2)
