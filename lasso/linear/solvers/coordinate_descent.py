@@ -13,13 +13,15 @@ def coord_descent(x, W, z0=None, alpha=1.0, maxiter=1000, tol=1e-6, verbose=Fals
         assert z0.shape == (batch_size, code_dim)
         z = z0
 
-    # initialize b
-    # TODO: how should we initialize b when 'z0' is provided?
-    b = torch.mm(x, W)  # [N,K]
-
     # precompute S = I - W^T @ W
     S = - torch.mm(W.T, W)  # [K,K]
     S.diagonal().add_(1.)
+
+    # initialize b, keeping the invariant b = x W + z S so that a warm
+    # start z0 is consistent with the coordinate updates below
+    b = torch.mm(x, W)  # [N,K]
+    if z0 is not None:
+        b = b + torch.mm(z, S)
 
     # loss function
     def fn(z):

@@ -103,6 +103,25 @@ def update_dict(dictionary, X, Z, random_seed=None, positive=False,
     return dictionary
 
 
+def update_dict_lstsq(x, z, reg=1e-6):
+    """Update a (constrained) dictionary by least squares + projection.
+
+    Solves the normal equations  V (z^T z + reg I) = x^T z  for the
+    unconstrained least-squares dictionary, then projects each atom onto
+    the unit l2 ball.  Vectorized (one k x k solve), unlike the per-atom
+    block-coordinate loop of :func:`update_dict`; the projection keeps the
+    atoms in the constraint set C = {||v_j||_2 <= 1}.
+
+    x : a batch of observations with shape (n_samples, n_features)
+    z : a batch of code vectors with shape (n_samples, n_components)
+    reg : Tikhonov term relative to the mean diagonal of z^T z
+    """
+    M = torch.mm(z.T, z)
+    M.diagonal().add_(reg * M.diagonal().mean() + 1e-12)
+    V = torch.linalg.solve(M, torch.mm(z.T, x)).T
+    return V / V.norm(dim=0, keepdim=True).clamp(min=1.0)
+
+
 def update_dict_ridge(x, z, lambd=1e-4):
     """Update an (unconstrained) dictionary with ridge regression
 

@@ -4,7 +4,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ..linear.sparse_encode import sparse_encode
-from ..linear.dict_learning import update_dict, update_dict_ridge
+from ..linear.dict_learning import (update_dict, update_dict_lstsq,
+                                    update_dict_ridge)
 
 
 def _soft(x, t):
@@ -28,7 +29,7 @@ def dict_evaluate(X, weight, alpha, **kwargs):
 def admm_dict_learning(X, n_components, alpha=1.0, rho=None, constrained=True,
                        persist=False, lambd=1e-2, steps=60, device='cpu',
                        progbar=True, init='orthogonal', return_codes=False,
-                       **solver_kwargs):
+                       dict_update=None, **solver_kwargs):
     r"""LAD-lasso dictionary learning via ADMM.
 
     Solves the robust (least-absolute-deviations) counterpart of
@@ -68,6 +69,13 @@ def admm_dict_learning(X, n_components, alpha=1.0, rho=None, constrained=True,
         l1 norm and warm-starts the codes with the matching diagonal, so
         iteration 0 reproduces those samples exactly (the truncation
         solution); it implies ``persist`` semantics for the first step.
+    dict_update : 'bcd' | 'lstsq' | 'ridge', optional
+        Dictionary update, all from :mod:`lasso.linear`: 'bcd' is the
+        per-atom block-coordinate :func:`update_dict` (default when
+        ``constrained``), 'lstsq' the vectorized least squares + unit-ball
+        projection :func:`update_dict_lstsq` (constrained, much faster for
+        many atoms), 'ridge' the unconstrained :func:`update_dict_ridge`
+        (default when not ``constrained``).
     return_codes : bool
         Also return the final codes ``Z``.  Unlike the l2 case they cannot
         be recovered by re-encoding ``X`` afterwards, since the ADMM codes
@@ -75,6 +83,11 @@ def admm_dict_learning(X, n_components, alpha=1.0, rho=None, constrained=True,
     """
     n_samples, n_features = X.shape
     X = X.to(device)
+    if dict_update is None:
+        dict_update = 'bcd' if constrained else 'ridge'
+    if dict_update not in ('bcd', 'lstsq', 'ridge'):
+        raise ValueError("invalid dict_update parameter '{}'.".format(dict_update))
+    constrained = dict_update != 'ridge'
     if rho is None:
         rho = 10.0 / float(X.abs().mean().clamp_min(1e-12))
 
@@ -104,8 +117,10 @@ def admm_dict_learning(X, n_components, alpha=1.0, rho=None, constrained=True,
                 Z0 = Z
 
             # update dictionary (same updates as lasso.linear)
-            if constrained:
+            if dict_update == 'bcd':
                 weight = update_dict(weight, B, Z)
+            elif dict_update == 'lstsq':
+                weight = update_dict_lstsq(B, Z)
             else:
                 weight = update_dict_ridge(B, Z, lambd=lambd)
 
