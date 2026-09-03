@@ -137,7 +137,11 @@ def _init_dictionary(X, n_components, init, constrained):
         weight = X[idx].T.clone()
         norms = weight.norm(dim=0).clamp_min(1e-8)
         Z0 = X.new_zeros(n_samples, n_components)
-        Z0[idx, torch.arange(len(idx), device=X.device)] = norms
+        # the diagonal must invert whatever scale the atoms keep: norms if
+        # they are normalized below, 1 if they stay raw (unconstrained)
+        Z0[idx, torch.arange(len(idx), device=X.device)] = (
+            norms if constrained else torch.ones_like(norms)
+        )
     else:
         weight = torch.empty(n_features, n_components, device=X.device)
         nn.init.orthogonal_(weight)

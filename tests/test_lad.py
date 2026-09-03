@@ -107,3 +107,14 @@ def test_zero_steps_returns_warm_start():
     idx = X.abs().sum(1).argsort(descending=True)[:24]
     torch.testing.assert_close(Z[idx] @ W.T, X[idx], atol=1e-5, rtol=1e-4)
     assert losses.shape == (0,)
+
+
+def test_unconstrained_topk_warm_start_reconstructs():
+    # ridge path: atoms stay unnormalized, so the warm diagonal must be 1
+    X = _outlier_problem()
+    W, Z, losses = admm_dict_learning(
+        X, n_components=24, steps=0, init='topk', dict_update='ridge',
+        progbar=False, return_codes=True,
+    )
+    idx = X.abs().sum(1).argsort(descending=True)[:24]
+    torch.testing.assert_close(Z[idx] @ W.T, X[idx], atol=1e-5, rtol=1e-4)
