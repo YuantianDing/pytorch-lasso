@@ -76,7 +76,11 @@ def admm_dict_learning(X, n_components, alpha=1.0, rho=None, constrained=True,
         ``constrained``), 'lstsq' the vectorized least squares + unit-ball
         projection :func:`update_dict_lstsq` (constrained, much faster for
         many atoms), 'ridge' the unconstrained :func:`update_dict_ridge`
-        (default when not ``constrained``).
+        (default when not ``constrained``).  Note that 'ridge' needs a
+        data-scaled ``lambd`` (its regularization is ``lambd * n_samples``
+        in absolute units, which zeroes the dictionary when the data scale
+        is small) and, with unnormalized atoms, the ISTA subproblem barely
+        moves off the warm start — in benchmarks it never beat 'lstsq'.
     return_codes : bool
         Also return the final codes ``Z``.  Unlike the l2 case they cannot
         be recovered by re-encoding ``X`` afterwards, since the ADMM codes
