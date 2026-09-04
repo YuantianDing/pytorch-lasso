@@ -2,27 +2,9 @@ import warnings
 import torch
 
 
-def qr(A):
-    try:
-        # only for newer pytorch versions
-        return torch.linalg.qr(A, mode='reduced')
-    except AttributeError:
-        return torch.qr(A, some=True)
-
-
 def lstsq(b, A):
-    m, n = A.shape[-2:]
-    if m < n:
-        # solve least-norm problem
-        Q, R = qr(A.transpose(-1,-2))
-        d = torch.triangular_solve(b, R.transpose(-1,-2), upper=False)[0]
-        x = torch.matmul(Q, d)
-    else:
-        # solve least-squares problem
-        Q, R = qr(A)
-        d = torch.matmul(Q.transpose(-1,-2), b)
-        x = torch.triangular_solve(d, R)[0]
-    return x
+    """Solve min_x ||A x - b||_2 (least-norm solution when A is wide)."""
+    return torch.linalg.lstsq(A, b).solution
 
 
 def ridge(b, A, alpha=1e-4):

@@ -175,3 +175,17 @@ W, Z, losses = alt_dict_learning(X, n_components=128, alpha=0.2, steps=10,
                                  init='topk', maxiter=5, n_update=4,
                                  return_codes=True)
 ```
+
+__LAD regression.__ `lasso.lad.lad_regression` solves the unpenalized
+problem `min_Z ||X − ZW^T||_1` by ADMM: split `R = X − ZW^T`, then
+alternate a least-squares solve for `Z` (`torch.linalg.lstsq`), a
+soft-threshold of the residual with threshold `1/rho`, and the dual
+update. When `maxiter * n_samples > n_components` the pseudo-inverse
+`W(W^TW)^{-1}` is formed once with `lstsq` and each iteration is a single
+matmul; otherwise `lstsq` runs every iteration (`precompute=` overrides).
+
+```python
+from lasso.lad import lad_regression
+
+Z = lad_regression(X, W, maxiter=200, tol=1e-6)   # rows of X are samples
+```
